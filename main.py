@@ -1,55 +1,41 @@
-import os, requests, time
+import os, requests, time, threading
 from datetime import datetime
-import math
+from flask import Flask
+import pytz
+app = Flask(__name__)
+@app.route('/')
+def home(): return "BOT ORO SOLO ORO VIVO"
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT = os.getenv("TELEGRAM_CHAT_ID")
-API_KEY = os.getenv("TWELVE_API_KEY")
+TOKEN=os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID=os.getenv("TELEGRAM_CHAT_ID")
+API_KEY=os.getenv("TWELVEDATA_API_KEY")
+EC=pytz.timezone("America/Guayaquil")
 
 def send(t):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT, "text": t, "parse_mode": "HTML"}, timeout=10)
+    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":t}, timeout=15)
     except: pass
 
-def get_xau():
+def get_stoch():
     try:
-        url = f"https://api.twelvedata.com/price?symbol=XAU/USD&apikey={API_KEY}"
-        r = requests.get(url, timeout=10).json()
-        return float(r['price'])
-    except:
-        return None
+        r=requests.get(f"https://api.twelvedata.com/stoch?symbol=XAU/USD&interval=5min&apikey={API_KEY}&k_period=13&d_period=3&slowing=3",timeout=12).json()
+        return float(r['values'][0]['k']), float(r['values'][0]['d'])
+    except: return None,None
 
-def get_indicators():
-    try:
-        # RSI y EMA de Twelve Data
-        url = f"https://api.twelvedata.com/rsi?symbol=XAU/USD&interval=5min&apikey={API_KEY}"
-        rsi = float(requests.get(url, timeout=10).json()['values'][0]['rsi'])
+def bot_loop():
+    time.sleep(5)
+    send("✅ BOT ORO SOLO ORO CONECTADO\nXAU/USD 13,3,3 35/65 - BINARIAS 5M")
+    while True:
+        try:
+            ahora=datetime.now(EC); hora=ahora.strftime("%H:%M")
+            if 6 <= ahora.hour <= 22:
+                k,d=get_stoch()
+                if k:
+                    if k<35 and d<40 and k>d:
+                        send(f"🟢 COMPRA BINARIAS ORO 5M\n💱 XAU/USD SOLO ORO\n⏰ {hora} EC\n📊 Stoch {k:.1f}/{d:.1f}\n👉 Siguiente vela 5M")
+                    elif k>65 and d>60 and k<d:
+                        send(f"🔴 VENTA BINARIAS ORO 5M\n💱 XAU/USD SOLO ORO\n⏰ {hora} EC\n📊 Stoch {k:.1f}/{d:.1f}\n👉 Siguiente vela 5M")
+            time.sleep(300)
+        except: time.sleep(10)
 
-        url = f"https://api.twelvedata.com/ema?symbol=XAU/USD&interval=5min&time_period=20&apikey={API_KEY}"
-        ema20 = float(requests.get(url, timeout=10).json()['values'][0]['ema'])
-
-        price = get_xau()
-        return price, rsi, ema20
-    except:
-        return None, None, None
-
-send("✅ <b>BOT ORO XAUUSD FOREX V4 ACTIVO</b>\n💰 Par: XAUUSD\n⏰ Timeframe: 5M/15M\n🔍 Buscando entradas...")
-
-while True:
-    try:
-        price, rsi, ema = get_indicators()
-        if price and rsi and ema:
-            hora = datetime.now().strftime("%H:%M:%S")
-            # ESTRATEGIA ORO FOREX
-            if rsi < 35 and price > ema:
-                tp = price + 5
-                sl = price - 3
-                send(f"🟢 <b>COMPRA XAUUSD ORO</b>\n💰 Precio: {price}\n📊 RSI: {rsi:.1f} (Sobreventa)\n📈 EMA20: {ema:.2f}\n✅ <b>TP:</b> {tp:.2f} (+50 pips)\n❌ <b>SL:</b> {sl:.2f} (-30 pips)\n⏰ {hora}\n🔥 FOREX")
-            elif rsi > 65 and price < ema:
-                tp = price - 5
-                sl = price + 3
-                send(f"🔴 <b>VENTA XAUUSD ORO</b>\n💰 Precio: {price}\n📊 RSI: {rsi:.1f} (Sobrecompra)\n📉 EMA20: {ema:.2f}\n✅ <b>TP:</b> {tp:.2f} (-50 pips)\n❌ <b>SL:</b> {sl:.2f} (+30 pips)\n⏰ {hora}\n🔥 FOREX")
-
-        time.sleep(180) # analiza cada 3 minutos
-    except:
-        time.sleep(60)
+threading.Thread(target=bot_loop,daemon=True).start()
+if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
