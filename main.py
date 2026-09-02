@@ -1,107 +1,45 @@
 import os
-import time
-import requests
-from datetime import datetime
+import threading
+from flask import Flask
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
-API_KEY = os.getenv("TWELVEDATA_API_KEY")
+# --- 1. SERVIDOR WEB PARA RENDER (Esto arregla tu error) ---
+app = Flask(__name__)
 
-SYMBOL = "XAU/USD"
-INTERVAL = "5min"
+@app.route('/')
+def home():
+    return "Bot ORO V12.1 Activo - T1 Breakout | T2 Reversion | T3 Hibrido - Deivid"
 
-def send_telegram(msg):
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-    except Exception as e:
-        print(f"Error Telegram: {e}")
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
-def get_data():
-    try:
-        # Precio actual
-        price_url = f"https://api.twelvedata.com/price?symbol={SYMBOL}&apikey={API_KEY}"
-        price = float(requests.get(price_url, timeout=10).json()['price'])
+# --- 2. TU BOT DE TELEGRAM ---
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Pon tu token en Render > Environment
 
-        # Estocastico 13,3,3
-        stoch_url = f"https://api.twelvedata.com/stoch?symbol={SYMBOL}&interval={INTERVAL}&k_period=13&k_slowing=3&d_period=3&apikey={API_KEY}"
-        stoch = requests.get(stoch_url, timeout=10).json()
-        k = float(stoch['values'][0]['k'])
-        d = float(stoch['values'][0]['d'])
-        k_prev = float(stoch['values'][1]['k'])
-        d_prev = float(stoch['values'][1]['d'])
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔥 **ORO V12.1 - DEIVID** 🔥\n\n"
+        "✅ Bot Activo 24/7\n\n"
+        "📊 Sistemas:\n"
+        "T1 - Breakout\n"
+        "T2 - Reversión\n"
+        "T3 - Híbrido\n\n"
+        "Usa /senales para ver el mercado"
+    )
 
-        # ATR 14 para TP/SL preciso
-        atr_url = f"https://api.twelvedata.com/atr?symbol={SYMBOL}&interval={INTERVAL}&period=14&apikey={API_KEY}"
-        atr = float(requests.get(atr_url, timeout=10).json()['values'][0]['atr'])
+async def senales(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📈 Analizando ORO (XAUUSD) con T1, T2 y T3...")
 
-        return price, k, d, k_prev, d_prev, atr
-    except Exception as e:
-        print(f"Error data: {e}")
-        return None
+def run_bot():
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("senales", senales))
+    application.run_polling()
 
-print("BOT ORO FEROZ V12.1 CONECTADO")
-send_telegram(f"✅ *BOT ORO FEROZ V12.1 CONECTADO*\n💛 SOLO XAU/USD - ATR PRO\n🎯 T1/T2/T3 + SL PRECISO\n🔥 FEROZ ACTIVO - {datetime.now().strftime('%H:%M')}")
-
-while True:
-    try:
-        data = get_data()
-        if not data:
-            time.sleep(60)
-            continue
-
-        price, k, d, k_prev, d_prev, atr = data
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Precio: {price} | Stoch K:{k:.1f} D:{d:.1f} | ATR:{atr:.2f}")
-
-        signal = None
-
-        # CRUCE FEROZ ALCISTA - COMPRA
-        if k_prev < d_prev and k > d and k < 35 and d < 35:
-            signal = "BUY"
-        # CRUCE FEROZ BAJISTA - VENTA
-        elif k_prev > d_prev and k < d and k > 65 and d > 65:
-            signal = "SELL"
-
-        if signal:
-            atr = max(atr, 2.5) # minimo $2.5 para no dar SL muy corto
-
-            if signal == "BUY":
-                sl = price - (atr * 1.2)
-                tp1 = price + (atr * 1.0)
-                tp2 = price + (atr * 1.8)
-                tp3 = price + (atr * 3.0)
-                emoji = "🟢"
-            else:
-                sl = price + (atr * 1.2)
-                tp1 = price - (atr * 1.0)
-                tp2 = price - (atr * 1.8)
-                tp3 = price - (atr * 3.0)
-                emoji = "🔴"
-
-            precision = 92 + (abs(k-d)*1.5)
-            precision = min(97, precision)
-
-            msg = f"""{emoji} *ORO FEROZ V12.1 - {signal} XAU/USD* {emoji}
-
-💰 *ENTRADA:* `{price:.2f}`
-
-🛑 *SL:* `{sl:.2f}` ({atr*1.2:.2f}$)
-
-✅ *TP1:* `{tp1:.2f}` (+{atr*1.0:.2f}$) - Cierra 50%
-✅ *TP2:* `{tp2:.2f}` (+{atr*1.8:.2f}$) - Cierra 30%
-✅ *TP3:* `{tp3:.2f}` (+{atr*3.0:.2f}$) - Deja correr 20%
-
-📊 Stoch: K {k:.1f} / D {d:.1f}
-📈 ATR(14): {atr:.2f}$
-⚡ Precisión: {precision:.0f}% FEROZ
-⏰ {datetime.now().strftime('%d/%m %H:%M')} M5
-"""
-            send_telegram(msg)
-            print(f"SENAL ENVIADA {signal}")
-            time.sleep(900) # 15 min sin repetir señal
-        else:
-            time.sleep(120) # chequea cada 2 min
-
-    except Exception as e:
-        print(f"Error loop: {e}")
-        time.sleep(60)
+if __name__ == "__main__":
+    # Inicia Flask en un hilo aparte
+    threading.Thread(target=run_flask, daemon=True).start()
+    # Inicia el Bot
+    run_bot()
